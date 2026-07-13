@@ -1,4 +1,5 @@
-# Render blueprint — WAAEM full stack (backend + frontend + PostgreSQL)
+# Render blueprint — WAAEM backend + PostgreSQL
+# (Frontend deploys to Vercel — see frontend/vercel.json and DEPLOYMENT.md.)
 # Deploy: Render Dashboard → New → Blueprint → connect this repo.
 databases:
   - name: waaem-db
@@ -30,19 +31,4 @@ services:
       - key: AI_ALLOW_FALLBACK
         value: "true"
       - key: CORS_ORIGINS
-        value: "*"
-
-  # --- Frontend: Next.js (standalone) ---
-  # Proxies /api/* to the backend via BACKEND_URL (server-side rewrite).
-  - type: web
-    name: waaem-frontend
-    runtime: docker
-    rootDir: frontend
-    dockerfilePath: ./Dockerfile
-    plan: starter
-    envVars:
-      # After the first deploy, set this to the backend's public URL,
-      # e.g. https://waaem-backend.onrender.com  (Blueprints can't inject
-      # a full https:// URL from another service, so it's set manually.)
-      - key: BACKEND_URL
-        sync: false
+        value: "*"          # tighten to your Vercel domain in production

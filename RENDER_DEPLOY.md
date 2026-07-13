@@ -1,37 +1,30 @@
-# Deploying WAAEM to Render
+# Deploying the WAAEM backend to Render
 
-This deploys the full stack on Render: **backend** (FastAPI), **frontend** (Next.js),
-and a managed **PostgreSQL** database — all defined in [`render.yaml`](render.yaml).
+The **frontend deploys to Vercel** (see [DEPLOYMENT.md](DEPLOYMENT.md)); this guide
+covers the **backend** (FastAPI) plus a managed **PostgreSQL** database, both
+defined in [`render.yaml`](render.yaml).
 
 ## Prerequisites
 - A [Render](https://render.com) account.
-- This repo pushed to GitHub (already at `NoraAbdullah33/WAAEM`).
+- This repo pushed to GitHub (at `NoraAbdullah33/WAAEM`).
 
 ## 1. Create the Blueprint
 1. Render Dashboard → **New +** → **Blueprint**.
 2. Connect the `NoraAbdullah33/WAAEM` repository.
-3. Render reads `render.yaml` and shows three resources:
+3. Render reads `render.yaml` and shows two resources:
    - `waaem-db` — PostgreSQL (free)
    - `waaem-backend` — Docker web service
-   - `waaem-frontend` — Docker web service
-4. Click **Apply**. The backend + database provision first.
+4. Click **Apply**. The database provisions first, then the backend builds.
 
-## 2. Wire the frontend to the backend
-The frontend proxies `/api/*` to the backend, so it needs the backend's public URL.
-
+## 2. Get the backend URL for Vercel
 1. Wait for **`waaem-backend`** to finish its first deploy.
 2. Copy its URL, e.g. `https://waaem-backend.onrender.com`.
-3. Open **`waaem-frontend`** → **Environment** → set:
-   ```
-   BACKEND_URL = https://waaem-backend.onrender.com
-   ```
-4. Save — the frontend redeploys automatically.
-
-Your app is then live at the **frontend** URL, e.g. `https://waaem-frontend.onrender.com`.
+3. In **Vercel**, set the frontend's `BACKEND_URL` env var to that URL
+   (Vercel rewrites `/api/*` to it). See [DEPLOYMENT.md](DEPLOYMENT.md) §A.
 
 ## 3. (Optional) Enable the LLM
 The backend runs with `AI_ALLOW_FALLBACK=true`, so it works without an LLM
-(canned/heuristic answers). To use a real model, point it at a hosted Ollama
+(retrieval-grounded answers). To use a real model, point it at a hosted Ollama
 endpoint:
 
 - **`waaem-backend`** → **Environment** → set `OLLAMA_HOST` to your endpoint
@@ -41,18 +34,18 @@ Render does not host Ollama itself — use a separate GPU/VM host for it.
 
 ## Environment variables reference
 
-| Service  | Variable            | Set by        | Notes |
-|----------|---------------------|---------------|-------|
-| backend  | `DATABASE_URL`      | Blueprint     | Auto-linked from `waaem-db`; app converts `postgres://` → asyncpg. |
-| backend  | `ENVIRONMENT`       | Blueprint     | `production` |
-| backend  | `CORS_ORIGINS`      | Blueprint     | `*` — tighten to the frontend URL for production. |
-| backend  | `AI_ALLOW_FALLBACK` | Blueprint     | `true` |
-| backend  | `OLLAMA_HOST`       | **you**       | Optional; hosted LLM endpoint. |
-| frontend | `BACKEND_URL`       | **you**       | Backend public URL (step 2). |
+| Variable            | Set by     | Notes |
+|---------------------|------------|-------|
+| `DATABASE_URL`      | Blueprint  | Auto-linked from `waaem-db`; app converts `postgres://` → asyncpg. |
+| `ENVIRONMENT`       | Blueprint  | `production` |
+| `CORS_ORIGINS`      | Blueprint  | `*` — tighten to your Vercel domain for production. |
+| `AI_ALLOW_FALLBACK` | Blueprint  | `true` |
+| `OLLAMA_HOST`       | **you**    | Optional; hosted LLM endpoint. |
 
 ## Notes
 - Migrations run automatically on backend start (`alembic upgrade head`).
-- Health check: `GET /api/health` on the backend.
-- The free Postgres plan and free/starter services **sleep when idle** and expire
-  after 90 days (free DB) — upgrade the plan for always-on production use.
-- To tighten CORS, set `CORS_ORIGINS` on the backend to your frontend URL instead of `*`.
+- Health check: `GET /api/health`.
+- The free Postgres plan and free/starter services **sleep when idle** and the
+  free DB expires after 90 days — upgrade the plan for always-on production use.
+- For persistent ChromaDB retrieval, attach a Render **disk** to the backend at
+  `CHROMA_DIR` (requires a paid plan).

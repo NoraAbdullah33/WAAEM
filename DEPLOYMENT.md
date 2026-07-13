@@ -1,11 +1,46 @@
 # WAAEM — Deployment Guide
 
-Two supported paths: **Docker Compose** (all-in-one) and **Render** (full stack).
-DB → managed PostgreSQL; Llama → Ollama on a GPU host (or `AI_ALLOW_FALLBACK=true`).
+**Recommended: Vercel (frontend) + a hosted backend.** Vercel runs the Next.js
+frontend; the FastAPI backend (PostgreSQL, ChromaDB, OCR, ingestion) runs on a
+container host and the frontend proxies `/api/*` to it. A single-host
+**Docker Compose** path is also included.
+
+> **Why the backend isn't on Vercel:** it needs a long-running process, a
+> persistent disk for ChromaDB, and system binaries (Tesseract OCR) — none of
+> which fit Vercel's serverless model. Host it on Render/Fly/Railway or any
+> Docker host, then point the frontend at it.
 
 ---
 
-## A) Docker Compose (single host)
+## A) Frontend → Vercel  (recommended)
+
+1. Import the repo at [vercel.com/new](https://vercel.com/new).
+2. Set **Root Directory** to `frontend` (Framework preset: Next.js — auto).
+3. Add an environment variable **`BACKEND_URL`** = your backend's public URL
+   (e.g. `https://waaem-backend.onrender.com`). Next.js rewrites `/api/*` to it.
+4. Deploy. Your app is live at the Vercel URL.
+
+The browser only ever calls the frontend's own `/api/*`, which Vercel rewrites
+to the backend server-side — so there are **no CORS issues** and the API base
+never changes. See **[frontend/vercel.json](frontend/vercel.json)**.
+
+---
+
+## B) Backend → any Docker host
+
+The backend ships a `Dockerfile` and a `render.yaml` blueprint. On Render:
+
+1. Render Dashboard → **New +** → **Blueprint** → connect the repo → **Apply**
+   (creates `waaem-db` Postgres + `waaem-backend`).
+2. `DATABASE_URL` is auto-linked and normalised to `asyncpg`; migrations run on
+   boot; health check is `/api/health`.
+3. Optionally set `OLLAMA_HOST` and tighten `CORS_ORIGINS` to your Vercel domain.
+
+Copy the resulting backend URL into Vercel's `BACKEND_URL` (step A3).
+
+---
+
+## C) Docker Compose (single host, all-in-one)
 
 ```bash
 docker compose up --build -d
@@ -16,25 +51,6 @@ docker compose exec ollama ollama pull llama3.1     # first run only
 - Postgres + Ollama run as services; migrations run automatically on backend boot.
 
 Stop: `docker compose down` (add `-v` to wipe volumes).
-
----
-
-## B) Render (full stack)
-
-Render deploys the backend, frontend, and PostgreSQL together from `render.yaml`.
-
-1. Render Dashboard → **New +** → **Blueprint** → connect the repo → **Apply**.
-   This creates `waaem-db` (Postgres), `waaem-backend`, and `waaem-frontend`.
-2. After the backend deploys, copy its URL and set `BACKEND_URL` on the
-   **frontend** service (e.g. `https://waaem-backend.onrender.com`).
-3. Optionally set `OLLAMA_HOST` on the backend (and tighten `CORS_ORIGINS`).
-
-`DATABASE_URL` is auto-linked and normalised to `asyncpg`; migrations run on
-backend boot; health check is `/api/health`. The browser calls the frontend's
-own `/api/*`, which Next.js rewrites to the backend — so there are **no CORS
-issues** and the API base never changes.
-
-See **[RENDER_DEPLOY.md](RENDER_DEPLOY.md)** for the full walkthrough.
 
 ---
 

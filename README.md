@@ -200,7 +200,7 @@ Interactive API docs are available at `/docs` (Swagger UI) when the backend is r
 
 **Infrastructure & deployment**
 - [Docker](https://www.docker.com/) + [Docker Compose](https://docs.docker.com/compose/) (full stack: PostgreSQL + Ollama + backend + frontend)
-- [Render](https://render.com/) (`render.yaml`, full stack) and [Vercel](https://vercel.com/) (`vercel.json`, frontend) configs included
+- [Vercel](https://vercel.com/) (`vercel.json`, frontend) and [Render](https://render.com/) (`render.yaml`, backend) configs included
 
 ---
 
@@ -246,7 +246,7 @@ WAAEM/
 │   └── vercel.json
 │
 ├── docker-compose.yml           # Full stack: Postgres + Ollama + backend + frontend
-├── render.yaml                  # Render blueprint (backend + frontend + Postgres)
+├── render.yaml                  # Render blueprint (backend + Postgres)
 ├── start.sh                     # One-command local dev (backend + frontend)
 ├── DEPLOYMENT.md
 └── RENDER_DEPLOY.md
@@ -394,20 +394,24 @@ docker compose exec ollama ollama pull llama3.1   # pull the local model once
 
 ## ☁️ Deployment
 
-WAAEM is container‑first and ships with configs for two common hosts.
+The frontend deploys to **Vercel**; the backend runs on any Docker host (with a managed PostgreSQL). The frontend proxies `/api/*` to the backend, so the browser only ever talks to one origin.
 
-### Render (recommended)
+### Vercel (recommended — frontend)
 
-The `render.yaml` blueprint provisions the full stack — backend + frontend (Docker web services) plus a managed PostgreSQL database — in one step:
+1. Import the repo at [vercel.com/new](https://vercel.com/new) and set **Root Directory** to `frontend` (Next.js preset auto-detected).
+2. Add an environment variable **`BACKEND_URL`** = your backend's public URL (e.g. `https://waaem-backend.onrender.com`).
+3. Deploy. Next.js rewrites `/api/*` to `BACKEND_URL` server-side, so there are **no CORS issues** and the API base never changes.
 
-- **Backend** runs `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`, with a health check on `/api/health`; `DATABASE_URL` is auto-linked from the database.
-- **Frontend** builds the Next.js standalone image; set `BACKEND_URL` to the backend's public URL after the first deploy.
+> Vercel hosts the Next.js frontend only. The FastAPI backend needs a long-running process, a persistent disk for ChromaDB, and Tesseract OCR — so it runs on a container host, not Vercel serverless.
 
-See **[RENDER_DEPLOY.md](RENDER_DEPLOY.md)** for the full walkthrough.
+### Backend (Render / Docker)
 
-### Vercel (frontend, optional)
+The `render.yaml` blueprint provisions the backend (Docker web service) plus a managed PostgreSQL database:
 
-Alternatively, deploy `frontend/` to Vercel and point the API proxy at your hosted backend. In `frontend/vercel.json`, replace `YOUR-BACKEND-HOST` with your backend URL (used in both the `/api/*` rewrite and `BACKEND_URL`).
+- **Backend** runs `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`, with a health check on `/api/health`; `DATABASE_URL` is auto-linked and normalised to `asyncpg`.
+- Copy the backend's public URL into Vercel's `BACKEND_URL`.
+
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full walkthrough.
 
 ### Docker Compose (self‑hosted full stack)
 
