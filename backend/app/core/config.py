@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def _async_driver(cls, v):
-        """Managed hosts (Render/Railway/Heroku) expose sync `postgres://` URLs.
+        """Managed hosts (Render/Heroku) expose sync `postgres://` URLs.
         Normalise them to the asyncpg driver the app uses."""
         if isinstance(v, str):
             if v.startswith("postgres://"):

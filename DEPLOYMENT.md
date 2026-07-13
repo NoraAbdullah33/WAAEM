@@ -1,8 +1,7 @@
 # WAAEM — Deployment Guide
 
-Three supported paths: **Docker Compose** (all-in-one), **Vercel + Railway**, and
-**Vercel + Render**. Frontend → Vercel; backend → Railway/Render; DB → managed
-PostgreSQL; Llama → Ollama on a GPU host (or `AI_ALLOW_FALLBACK=true`).
+Two supported paths: **Docker Compose** (all-in-one) and **Render** (full stack).
+DB → managed PostgreSQL; Llama → Ollama on a GPU host (or `AI_ALLOW_FALLBACK=true`).
 
 ---
 
@@ -20,40 +19,22 @@ Stop: `docker compose down` (add `-v` to wipe volumes).
 
 ---
 
-## B) Backend → Railway
+## B) Render (full stack)
 
-1. New Project → Deploy from repo → set **root directory** to `backend`.
-   Railway reads `backend/railway.json` (Dockerfile build).
-2. Add a **PostgreSQL** plugin → it injects `DATABASE_URL` (auto-normalised to
-   `asyncpg` by the app).
-3. Set variables:
-   ```
-   ENVIRONMENT=production
-   OLLAMA_HOST=https://<your-ollama-host>       # or leave default + AI_ALLOW_FALLBACK=true
-   LLAMA_MODEL=llama3.1
-   AI_ALLOW_FALLBACK=true
-   CORS_ORIGINS=https://<your-vercel-domain>
-   ```
-4. Deploy. Start command runs `alembic upgrade head` then uvicorn on `$PORT`.
+Render deploys the backend, frontend, and PostgreSQL together from `render.yaml`.
 
-## B) Backend → Render (alternative)
+1. Render Dashboard → **New +** → **Blueprint** → connect the repo → **Apply**.
+   This creates `waaem-db` (Postgres), `waaem-backend`, and `waaem-frontend`.
+2. After the backend deploys, copy its URL and set `BACKEND_URL` on the
+   **frontend** service (e.g. `https://waaem-backend.onrender.com`).
+3. Optionally set `OLLAMA_HOST` on the backend (and tighten `CORS_ORIGINS`).
 
-- Push the repo; Render reads `render.yaml` (creates the web service + Postgres).
-- Set `OLLAMA_HOST` (and optionally `CORS_ORIGINS`) in the dashboard.
-- Health check: `/api/health`.
+`DATABASE_URL` is auto-linked and normalised to `asyncpg`; migrations run on
+backend boot; health check is `/api/health`. The browser calls the frontend's
+own `/api/*`, which Next.js rewrites to the backend — so there are **no CORS
+issues** and the API base never changes.
 
----
-
-## C) Frontend → Vercel
-
-1. Import the repo → set **root directory** to `frontend`.
-2. Edit `frontend/vercel.json` → replace `YOUR-BACKEND-HOST` with your
-   Railway/Render backend URL (this proxies `/api/*` to the backend).
-   Or set env `BACKEND_URL=https://<backend-host>`.
-3. Deploy. Framework preset: Next.js (auto).
-
-The browser calls the frontend's own `/api/*`, which Vercel rewrites to the
-backend — so there are **no CORS issues** and the API base never changes.
+See **[RENDER_DEPLOY.md](RENDER_DEPLOY.md)** for the full walkthrough.
 
 ---
 
