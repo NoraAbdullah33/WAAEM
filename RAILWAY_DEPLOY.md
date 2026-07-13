@@ -24,13 +24,10 @@ GitHub  ──►  Railway
 
 ## 1) ارفع المشروع إلى مستودع GitHub جديد
 
-من مجلد المشروع `rakez` (أُنشئ المستودع محلياً بالفعل):
+من مجلد المشروع `WAAEM` (المستودع المحلي والريموت مُعدّان بالفعل، والوجهة `NoraAbdullah33/WAAEM`):
 
 ```bash
-cd /Users/lamia/Desktop/rakez
-# أنشئ مستودعاً جديداً على github.com باسم waaem ثم:
-git remote add origin https://github.com/<اسم-حسابك>/waaem.git
-git branch -M main
+cd /Users/lamia/Desktop/WAAEM
 git push -u origin main
 ```
 
