@@ -33,7 +33,6 @@ It does this with **Retrieval‑Augmented Generation (RAG)**: the platform maint
 - [Features](#-features)
 - [Supported Regulatory Authorities](#-supported-regulatory-authorities)
 - [How It Works](#-how-it-works)
-- [Deployment](#-deployment)
 - [Knowledge Base](#-knowledge-base)
 - [Compliance Report](#-compliance-report)
 - [Screenshots](#-screenshots)
@@ -112,46 +111,6 @@ flowchart LR
 ```
 
 > If Llama is unavailable or errors out, step 7 is replaced by a deterministic **retrieval‑grounded scorer** that assigns compliance status from semantic‑similarity thresholds — using the exact same retrieved requirements, so the report is always produced and always cited.
-
----
-
-## ☁️ Deployment
-
-The frontend deploys to **Vercel**; the backend runs on any Docker host (with a managed PostgreSQL). The frontend proxies `/api/*` to the backend, so the browser only ever talks to one origin.
-
-### Vercel (recommended — frontend)
-
-1. Import the repo at [vercel.com/new](https://vercel.com/new) and set **Root Directory** to `frontend` (Next.js preset auto-detected).
-2. Add an environment variable **`BACKEND_URL`** = your backend's public URL (e.g. `https://waaem-backend.onrender.com`).
-3. Deploy. Next.js rewrites `/api/*` to `BACKEND_URL` server-side, so there are **no CORS issues** and the API base never changes.
-
-> Vercel hosts the Next.js frontend only. The FastAPI backend needs a long-running process, a persistent disk for ChromaDB, and Tesseract OCR — so it runs on a container host, not Vercel serverless.
-
-### Backend (Render / Docker)
-
-The `render.yaml` blueprint provisions the backend (Docker web service) plus a managed PostgreSQL database:
-
-- **Backend** runs `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`, with a health check on `/api/health`; `DATABASE_URL` is auto-linked and normalised to `asyncpg`.
-- Copy the backend's public URL into Vercel's `BACKEND_URL`.
-
-See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full walkthrough.
-
-### Docker Compose (self‑hosted full stack)
-
-```bash
-docker compose up --build
-```
-
-This runs PostgreSQL, Ollama, the backend, and the frontend, with named volumes for `pgdata`, `ollama`, `uploads`, and `knowledge_base`.
-
-### 💾 Persistent storage for ChromaDB
-
-The vector store is the **source of truth for retrieval** and must persist across restarts and redeploys. Mount a **persistent volume** at `CHROMA_DIR` (default `./knowledge_base/chroma`):
-
-- **Docker Compose** already mounts the `knowledge_base` named volume at `/app/knowledge_base`.
-- On **Render**, attach a persistent disk to the backend at the same path.
-
-If the store is empty on boot and `KB_AUTO_BUILD=true`, WAAEM re‑ingests the official sources automatically — but a persistent volume avoids re‑downloading and re‑embedding on every deploy.
 
 ---
 
