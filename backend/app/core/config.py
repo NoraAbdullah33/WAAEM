@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     kb_dir: str = Field(default="./knowledge_base")
     chroma_dir: str = Field(default="./knowledge_base/chroma")
     kb_collection: str = Field(default="saudi_regulations")
+    # Managed vector store: when CHROMA_API_KEY is set, use hosted Chroma Cloud
+    # instead of the local on-disk store (tenant + database from the Chroma Cloud
+    # console). Leave empty to keep the local PersistentClient.
+    chroma_api_key: str = Field(default="")
+    chroma_tenant: str = Field(default="")
+    chroma_database: str = Field(default="")
     # fastembed multilingual model (Arabic + English), CPU/ONNX, no torch.
     embed_model: str = Field(default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     embed_dim: int = Field(default=384)
@@ -68,6 +74,10 @@ class Settings(BaseSettings):
     @property
     def use_groq(self) -> bool:
         return bool(self.groq_api_key.strip())
+
+    @property
+    def use_chroma_cloud(self) -> bool:
+        return bool(self.chroma_api_key.strip())
 
     @field_validator("cors_origins", "allowed_extensions", mode="before")
     @classmethod

@@ -1,16 +1,31 @@
 """Async SQLAlchemy engine, session factory and declarative base."""
 from collections.abc import AsyncGenerator
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-# `check_same_thread` is a SQLite-only connect arg.
-connect_args = {"check_same_thread": False} if settings.is_sqlite else {}
+url = make_url(settings.database_url)
+connect_args: dict = {}
+
+if settings.is_sqlite:
+    # `check_same_thread` is a SQLite-only connect arg.
+    connect_args = {"check_same_thread": False}
+else:
+    # Managed Postgres (Neon/Supabase) URLs carry libpq params like
+    # `sslmode`/`channel_binding` that asyncpg's driver doesn't accept. Strip
+    # them and translate a required SSL mode into asyncpg's `ssl` connect arg.
+    query = dict(url.query)
+    sslmode = query.pop("sslmode", None)
+    query.pop("channel_binding", None)
+    url = url.set(query=query)
+    if sslmode and sslmode != "disable":
+        connect_args["ssl"] = True
 
 engine = create_async_engine(
-    settings.database_url,
+    url,
     echo=False,
     pool_pre_ping=not settings.is_sqlite,
     connect_args=connect_args,

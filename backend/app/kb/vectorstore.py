@@ -18,8 +18,20 @@ logger = get_logger("waaem.kb.vector")
 def _collection():
     import chromadb
 
-    os.makedirs(settings.chroma_dir, exist_ok=True)
-    client = chromadb.PersistentClient(path=settings.chroma_dir)
+    if settings.use_chroma_cloud:
+        # Managed Chroma Cloud — no local disk needed.
+        client = chromadb.CloudClient(
+            api_key=settings.chroma_api_key,
+            tenant=settings.chroma_tenant,
+            database=settings.chroma_database,
+        )
+        logger.info("vector store: Chroma Cloud (tenant=%s db=%s)",
+                    settings.chroma_tenant, settings.chroma_database)
+    else:
+        # Local on-disk store.
+        os.makedirs(settings.chroma_dir, exist_ok=True)
+        client = chromadb.PersistentClient(path=settings.chroma_dir)
+        logger.info("vector store: local PersistentClient (%s)", settings.chroma_dir)
     # We supply our own embeddings (fastembed multilingual).
     return client.get_or_create_collection(
         name=settings.kb_collection, metadata={"hnsw:space": "cosine"}
