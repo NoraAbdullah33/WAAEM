@@ -22,7 +22,7 @@
 
 WAAEM (Arabic: **واءم**, *to align/harmonize*) is an AI‑powered platform that compares any uploaded governance document — a policy, procedure, manual, or internal regulation — against an **official Saudi regulatory knowledge base**, and returns a structured, Arabic‑first compliance report.
 
-It does this with **Retrieval‑Augmented Generation (RAG)**: the platform maintains a live vector index of official regulations published by five Saudi authorities, retrieves the requirements most relevant to your document, and asks **Llama** to judge compliance grounded strictly in the retrieved regulatory text. There are **no hardcoded rules and no manual mappings** — and the model is never allowed to invent regulations that aren't in the knowledge base.
+It does this with **Retrieval‑Augmented Generation (RAG)**: the platform maintains a live vector index of official regulations published by five Saudi authorities, retrieves the requirements most relevant to your document, and asks **Llama** to judge compliance grounded strictly in the retrieved regulatory text. There are **no hardcoded rules and no manual mappings**, the model is never allowed to invent regulations that aren't in the knowledge base, and **the compliance verdict is always the model's real judgment** — never a keyword‑similarity guess.
 
 > **A real knowledge base, not a mock.** An ingestion pipeline downloads the actual official PDFs, extracts and chunks them, generates embeddings, and indexes them into a persistent vector database. Any source that cannot be fetched is **reported honestly with a reason** — never fabricated.
 
@@ -31,6 +31,7 @@ It does this with **Retrieval‑Augmented Generation (RAG)**: the platform maint
 ## 📑 Table of Contents
 
 - [Features](#-features)
+- [The AI Model](#-the-ai-model)
 - [Supported Regulatory Authorities](#-supported-regulatory-authorities)
 - [How It Works](#-how-it-works)
 - [Knowledge Base](#-knowledge-base)
@@ -47,7 +48,7 @@ It does this with **Retrieval‑Augmented Generation (RAG)**: the platform maint
 | 📤 | **Document upload** | Upload `PDF` and `DOCX` files (up to 25 MB by default). Analysis begins automatically on upload. |
 | 📝 | **Automatic text extraction** | PDFs via **pdfplumber** with a **PyMuPDF** fallback; Word documents via **python‑docx** (including tables). |
 | 🔎 | **OCR support** | Scanned regulatory PDFs with no text layer are OCR'd with **Tesseract** (`ara+eng`) during knowledge‑base ingestion. |
-| 🤖 | **AI‑powered compliance analysis** | **Llama** judges each retrieved requirement as *Compliant / Partially Compliant / Non‑Compliant / Not Applicable*, with an Arabic justification. |
+| 🤖 | **AI‑powered compliance analysis** | **Llama** judges each retrieved requirement as *Compliant / Partially Compliant / Non‑Compliant / Not Applicable*, with an Arabic justification. A genuinely non‑compliant document is judged as such — down to 0%. |
 | 🧠 | **Retrieval‑Augmented Generation (RAG)** | Every judgment is grounded strictly in official regulatory text retrieved from the vector store — the model never invents regulations. |
 | 📚 | **Vector search** | Multilingual (Arabic + English) semantic search over **ChromaDB** with cosine similarity and per‑authority coverage. |
 | 🏛️ | **Official Saudi regulatory knowledge base** | 71 official source documents across 5 authorities, auto‑ingested from government portals with full provenance. |
@@ -62,9 +63,24 @@ It does this with **Retrieval‑Augmented Generation (RAG)**: the platform maint
 
 ### Reliability built in
 
-- **Graceful AI fallback** — if the primary model is unreachable or returns an error, WAAEM falls back to a deterministic, retrieval‑grounded scorer so the analysis never fails outright. It still cites only real retrieved regulations.
+- **The verdict is always the model's judgment.** WAAEM does **not** substitute a keyword‑similarity score for a real analysis. The compliance status of every requirement comes from Llama reading your document against the retrieved regulation — so a document that merely *mentions* a topic is not credited as compliant.
+- **Resilient, not fabricated.** Transient rate‑limits from the hosted model are retried automatically with backoff. If the model genuinely cannot be reached, WAAEM returns an honest *"AI analysis unavailable — please try again"* error instead of inventing a number.
 - **Honest ingestion** — the downloader respects `robots.txt`, validates that every download is a real PDF, and records failures (WAF/bot protection, HTTP status, broken link, not‑a‑PDF, needs‑OCR) instead of fabricating content.
 - **Version history** — when a newer version of a regulation is detected (by file hash), the old version is superseded and re‑indexed while history is preserved.
+
+---
+
+## 🧠 The AI Model
+
+WAAEM's compliance verdict is produced by **Meta Llama**, chosen because it is open‑weight (so it can be self‑hosted for sensitive documents), strong in Arabic, and reliable at structured JSON output.
+
+| Mode | Model | When it's used |
+|---|---|---|
+| **Hosted (default)** | **Llama 3.3 70B** via **Groq** (`llama-3.3-70b-versatile`) | Set `GROQ_API_KEY`. Fast LPU inference, no local GPU — the recommended path. Judges every retrieved control. |
+| **Local** | **Llama 3.1** via **Ollama** (`llama3.1`) | No Groq key configured. Runs entirely on your own hardware for full data privacy. |
+| **Local (alt.)** | Any **llama.cpp** OpenAI‑compatible endpoint | Optional `LLAMACPP_URL`, used if Ollama is unreachable. |
+
+Whichever mode is active, the model receives the uploaded document plus the RAG‑retrieved official requirements and returns a strict per‑requirement judgment (status + Arabic evidence). The backend attaches the authority, citation, and severity from the knowledge base — the model never fabricates those. **There is no non‑Llama scoring path**: if the model can't judge, the analysis errors honestly rather than falling back to a similarity estimate.
 
 ---
 
@@ -110,7 +126,7 @@ flowchart LR
     KB[("🏛️ Regulatory KB<br/>71 official docs")] -.indexed into.-> E
 ```
 
-> If Llama is unavailable or errors out, step 7 is replaced by a deterministic **retrieval‑grounded scorer** that assigns compliance status from semantic‑similarity thresholds — using the exact same retrieved requirements, so the report is always produced and always cited.
+> **RAG selects the regulations; Llama makes the call.** Retrieval decides *which* official requirements are relevant; the compliance status of each one is the model's judgment of your document against that requirement. If Llama is momentarily rate‑limited it is retried automatically; if it is truly unavailable the analysis returns an honest error rather than a fabricated score.
 
 ---
 

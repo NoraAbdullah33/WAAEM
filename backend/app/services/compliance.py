@@ -24,11 +24,6 @@ from app.services.llama import _extract_json, llama_client
 
 logger = get_logger("waaem.compliance")
 
-# cosine-similarity thresholds (paraphrase-multilingual-MiniLM)
-T_COMPLIANT = 0.60
-T_PARTIAL = 0.47
-T_EVIDENCE = 0.40
-
 
 def _auth_ar(code: str) -> str:
     """Arabic name of an authority from its acronym (falls back to the acronym)."""
@@ -101,51 +96,8 @@ def retrieve_requirements(uploaded_text: str, per_query: int = 4, per_authority:
     return sorted(best.values(), key=lambda x: x["score"], reverse=True)[:cap]
 
 
-def _status_for(score: float) -> tuple[str, str]:
-    if score >= T_COMPLIANT:
-        return "Compliant", "low"
-    if score >= T_PARTIAL:
-        return "Partially Compliant", "medium"
-    if score >= T_EVIDENCE:
-        return "Non-Compliant", "high"
-    return "Non-Compliant", "high"
-
-
 def _score_value(status: str) -> int:
     return {"Compliant": 100, "Partially Compliant": 55, "Non-Compliant": 0, "Not Applicable": 0}.get(status, 0)
-
-
-def build_retrieval_report(requirements: list[dict]) -> ComplianceReport:
-    """Deterministic, retrieval-grounded compliance scoring (no LLM)."""
-    findings: list[Finding] = []
-    for r in requirements:
-        m = r["meta"]
-        score = float(r["score"])
-        status, severity = _status_for(score)
-        has_ev = score >= T_EVIDENCE
-        if m.get("authority") == "NCA" and status == "Non-Compliant":
-            severity = "critical"
-        title = _ar_title(r)
-        reg_ev = title  # Arabic requirement label (source PDFs are English/garbled-AR)
-        up_ev = (r["uploaded_evidence"][:300].strip() if has_ev else "لا يوجد دليل كافٍ في الوثيقة يغطي هذا المتطلب.")
-        cite = _cite_ar(m)
-        findings.append(Finding(
-            requirement_title=title, authority=m.get("authority", ""),
-            source_document=m.get("title_ar") or m.get("title_en", ""), section=str(m.get("section", "")),
-            status=status, match_score=round(score, 3), severity=severity,
-            why=(f"تطابق دلالي بنسبة {round(score*100)}% بين محتوى وثيقتك والمتطلب النظامي."
-                 if has_ev else "لم يُعثر على دليل كافٍ في الوثيقة المرفوعة يغطي هذا المتطلب."),
-            evidence_uploaded=up_ev, evidence_regulation=reg_ev,
-            gap=("لا توجد فجوة جوهرية." if status == "Compliant"
-                 else "المتطلب مغطّى جزئياً ويحتاج تفصيلاً إضافياً." if status == "Partially Compliant"
-                 else "المتطلب غير مغطّى في الوثيقة الحالية."),
-            recommendation=f"مواءمة الوثيقة مع {cite} لسدّ الفجوة.",
-            suggested_improvement=("إضافة بند صريح يغطي هذا الضابط مع تحديد المالك وآلية القياس."
-                                   if status != "Compliant" else "الحفاظ على الالتزام ومراجعته دورياً."),
-            reference_id=m.get("reference_id", ""), source_url=m.get("source_url", ""),
-        ))
-
-    return _finalize(findings, engine="retrieval")
 
 
 def _finalize(findings: list[Finding], engine: str) -> ComplianceReport:
@@ -362,44 +314,54 @@ async def analyze(uploaded_text: str) -> ComplianceReport:
     if not requirements:
         raise AnalysisError("تعذّر استرجاع متطلبات نظامية مطابقة للوثيقة.")
 
-    # Llama primary when available; always fall back to the grounded retrieval
-    # report so the analysis never fails outright.
-    if await llama_client.health():
-        if settings.use_groq:
-            # Hosted Groq is fast → judge ALL retrieved controls, no time budget,
-            # fall back only on a real API error.
-            llama_reqs = requirements
-        else:
-            # Local CPU: keep a small, balanced set (round-robin one control per
-            # authority) so Llama's Arabic analysis finishes inside the time budget.
-            by_auth: dict[str, list] = {}
-            for r in requirements:  # already ranked by score desc
-                by_auth.setdefault(r["meta"].get("authority", "?"), []).append(r)
-            lists = list(by_auth.values())
-            llama_reqs = []
-            rnd = 0
-            while len(llama_reqs) < LLAMA_MAX_CONTROLS and any(len(x) > rnd for x in lists):
-                for x in lists:
-                    if len(x) > rnd and len(llama_reqs) < LLAMA_MAX_CONTROLS:
-                        llama_reqs.append(x[rnd])
-                rnd += 1
-        for attempt in range(settings.llama_max_retries + 1):
-            try:
-                logger.info("Llama compliance attempt %d (%d requirements · %s)…",
-                            attempt + 1, len(llama_reqs), "groq" if settings.use_groq else "ollama")
-                if settings.use_groq:
-                    # No fixed timeout — Groq responds in well under a second per call.
-                    return await build_llama_report(uploaded_text, llama_reqs)
-                return await asyncio.wait_for(build_llama_report(uploaded_text, llama_reqs), timeout=LLAMA_BUDGET_SECONDS)
-            except asyncio.TimeoutError:
-                logger.warning("Llama compliance timed out (>%ds) — using retrieval-grounded report", LLAMA_BUDGET_SECONDS)
-                break
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Llama compliance attempt %d failed: %s: %s", attempt + 1, type(e).__name__, e)
-        logger.warning("Falling back to retrieval-grounded scorer")
+    # The compliance verdict comes SOLELY from Llama's real judgment. There is no
+    # similarity-based fallback: a topic-overlap scorer would credit a document
+    # that merely mentions a subject as "partially compliant", so a genuinely
+    # non-compliant document must be judged Non-Compliant (→ 0%) by the model.
+    # If Llama cannot produce a valid judgment we raise, so the user sees an
+    # honest "try again" error instead of a fabricated score.
+    if not await llama_client.health():
+        raise AnalysisError(
+            "خدمة التحليل بالذكاء الاصطناعي (Llama) غير متاحة حالياً. يرجى المحاولة بعد قليل."
+        )
 
-    try:
-        return build_retrieval_report(requirements)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("retrieval report failed: %s", e)
-        raise AnalysisError("تعذّر إنشاء تقرير الامتثال.")
+    if settings.use_groq:
+        # Hosted Groq is fast → judge ALL retrieved controls (429s are retried
+        # with backoff inside the Groq client).
+        llama_reqs = requirements
+    else:
+        # Local CPU: keep a small, balanced set (round-robin one control per
+        # authority) so Llama's Arabic analysis finishes inside the time budget.
+        by_auth: dict[str, list] = {}
+        for r in requirements:  # already ranked by score desc
+            by_auth.setdefault(r["meta"].get("authority", "?"), []).append(r)
+        lists = list(by_auth.values())
+        llama_reqs = []
+        rnd = 0
+        while len(llama_reqs) < LLAMA_MAX_CONTROLS and any(len(x) > rnd for x in lists):
+            for x in lists:
+                if len(x) > rnd and len(llama_reqs) < LLAMA_MAX_CONTROLS:
+                    llama_reqs.append(x[rnd])
+            rnd += 1
+
+    last_err: Exception | None = None
+    for attempt in range(settings.llama_max_retries + 1):
+        try:
+            logger.info("Llama compliance attempt %d (%d requirements · %s)…",
+                        attempt + 1, len(llama_reqs), "groq" if settings.use_groq else "ollama")
+            if settings.use_groq:
+                # No fixed timeout — Groq responds in well under a second per call.
+                return await build_llama_report(uploaded_text, llama_reqs)
+            return await asyncio.wait_for(build_llama_report(uploaded_text, llama_reqs), timeout=LLAMA_BUDGET_SECONDS)
+        except asyncio.TimeoutError as e:
+            last_err = e
+            logger.warning("Llama compliance timed out (>%ds) on attempt %d", LLAMA_BUDGET_SECONDS, attempt + 1)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            logger.warning("Llama compliance attempt %d failed: %s: %s", attempt + 1, type(e).__name__, e)
+
+    logger.error("Llama compliance failed after %d attempts: %s",
+                 settings.llama_max_retries + 1, last_err)
+    raise AnalysisError(
+        "تعذّر إكمال تحليل الامتثال بالذكاء الاصطناعي (Llama) حالياً. يرجى إعادة المحاولة بعد قليل."
+    )

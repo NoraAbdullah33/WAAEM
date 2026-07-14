@@ -59,7 +59,7 @@ class ComplianceReport(BaseModel):
     missing_controls: List[str] = Field(default_factory=list)
     recommendations: List[str] = Field(default_factory=list)
     totals: ComplianceTotals = Field(default_factory=ComplianceTotals)
-    engine: str = ""                  # llama | retrieval
+    engine: str = ""                  # always "llama" — the compliance verdict is the model's judgment
     knowledge_base: dict = Field(default_factory=dict)
 
     @field_validator("overall_compliance", mode="before")
